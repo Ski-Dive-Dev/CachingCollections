@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.6.33829.357
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CachingCollections", "CachingCollections\CachingCollections.csproj", "{C784A8E2-B1D0-4E00-8BDF-1893B20713AB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CachingCollectionTests", "CachingCollectionTests\CachingCollectionTests.csproj", "{452D9B2F-4929-4BD0-9D5D-78D646D664BB}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C784A8E2-B1D0-4E00-8BDF-1893B20713AB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C784A8E2-B1D0-4E00-8BDF-1893B20713AB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C784A8E2-B1D0-4E00-8BDF-1893B20713AB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C784A8E2-B1D0-4E00-8BDF-1893B20713AB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{452D9B2F-4929-4BD0-9D5D-78D646D664BB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{452D9B2F-4929-4BD0-9D5D-78D646D664BB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{452D9B2F-4929-4BD0-9D5D-78D646D664BB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{452D9B2F-4929-4BD0-9D5D-78D646D664BB}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {F1093CC4-0ED7-41B8-BE92-FE4FA49A5CA4}
+	EndGlobalSection
+EndGlobal
