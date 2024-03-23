@@ -108,11 +108,12 @@ namespace CachingCollections
         /// <see cref="Object.Equals(object)"/> when compared to one another.</param>
         public CachingCollectionBase(ICollection<T> items, bool removeDuplicates = true)
         {
+            DuplicatesAlwaysRemoved = removeDuplicates;
             _noDupesItems = items;
-            ItemsIsComplete = true;
 
             SourceItems = items;
-            DuplicatesAlwaysRemoved = removeDuplicates;
+            Items = (IReadOnlyCollection<T>)items;
+            ItemsIsComplete = true; // because items is an ICollection, and not an IEnumerable
         }
 
 
