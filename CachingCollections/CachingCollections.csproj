@@ -10,7 +10,7 @@ The library is intended to minimize the number of times a collection is enumerat
     <Copyright>2024, Eric S. Li</Copyright>
     <PackageReleaseNotes>Initial alpha release.  Functional, but not thoroughly tested, and not performance tested.</PackageReleaseNotes>
     <AssemblyVersion>0.0.0.0-alpha</AssemblyVersion>
-    <FileVersion>0.0.0.0-alpha</FileVersion>
+    <FileVersion>0.0.0.1</FileVersion>
     <NeutralLanguage>en</NeutralLanguage>
     <PackageTags>IEnumerable, Enumerable, ICollection, IList, IReadOnlyCollection, Where, Query, Filter, LINQ, Caching</PackageTags>
   </PropertyGroup>
