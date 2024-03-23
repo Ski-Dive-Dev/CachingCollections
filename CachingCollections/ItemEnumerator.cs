@@ -70,10 +70,7 @@ namespace CachingCollections
                             .OrderByDescending(qc => qc.Misses?.Count ?? 0); // Most Misses == Most Restrictive
 
                         // Save the enumerated items in these collections:
-                        if (!cachingCollection.DuplicatesAlwaysRemoved)
-                        {
                             _enumeratedItems = new List<T>();
-                        }
                         _enumeratedItemsNoDupes = new HashSet<T>();
                     }
                 }
@@ -90,13 +87,6 @@ namespace CachingCollections
             /// <inheritdoc/>
             public bool MoveNext()
             {
-                if (!_itemEnumerator.MoveNext())
-                {
-                    HandleEndOfSourceItems();
-                    const bool falseToIndicateEnumeratorIsPastEndOfCollection = false;
-                    return falseToIndicateEnumeratorIsPastEndOfCollection;
-                }
-
                 // Note! if moreAvailable is false, Current will be invalid
                 bool moreAvailable;
                 (Current, moreAvailable) = GetNext();
@@ -107,11 +97,12 @@ namespace CachingCollections
 
             public (T sourceItem, bool moreAvailable) GetNext()
             {
-                T sourceItem;
-                bool filteredIn;
+                T sourceItem = _itemEnumerator.Current; // hack to get around not being able to use default(T)
+                var filteredIn = false;
+                var stillSourceItemsLeftToEnumerate = true;
 
                 // Iterate through the source items until one passes all the filters (then return that one):
-                do
+                while (!filteredIn && (stillSourceItemsLeftToEnumerate = _itemEnumerator.MoveNext()))
                 {
                     sourceItem = _itemEnumerator.Current;
                     AddItem(sourceItem);
@@ -125,9 +116,9 @@ namespace CachingCollections
                         if (_cachingCollection.ItemsIsComplete && !filteredIn) { break; }
                         // Otherwise, even if !filteredIn, keep iterating to build the caches...
                     }
-                } while (!filteredIn && _itemEnumerator.MoveNext());
+                }
 
-                if (!filteredIn)
+                if (!stillSourceItemsLeftToEnumerate)
                 {
                     // MoveNext() returned false -- we're at the end of the source enumeration
                     HandleEndOfSourceItems();
