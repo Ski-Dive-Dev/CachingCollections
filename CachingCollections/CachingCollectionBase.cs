@@ -203,8 +203,8 @@ namespace CachingCollections
         public virtual T? ItemWithMaxValue(Func<T, int> valueGetter)
         {
             var itemWithMaxValue = TryFirstTimeEnumeration(LargerOfTwo, out var itemWithMaxValue2)
-                ? _noDupesItems.Aggregate(LargerOfTwo) // _items is fully enumerated
-                : itemWithMaxValue2; // the result of applying the aggregate while enumerating for first time
+                ? itemWithMaxValue2 // the result of applying the aggregate while enumerating for first time
+                : _noDupesItems.Aggregate(LargerOfTwo); // _items is fully enumerated
 
             return itemWithMaxValue;
 
@@ -221,8 +221,8 @@ namespace CachingCollections
         public virtual T? ItemWithMinValue(Func<T, int> valueGetter)
         {
             var itemWithMinValue = TryFirstTimeEnumeration(SmallerOfTwo, out var itemWithMinValue2)
-                ? _noDupesItems.Aggregate(SmallerOfTwo) // _items is fully enumerated
-                : itemWithMinValue2; // the result of applying the aggregate while enumerating for first time
+                ? itemWithMinValue2 // the result of applying the aggregate while enumerating for first time
+                : _noDupesItems.Aggregate(SmallerOfTwo); // _items is fully enumerated
 
             return itemWithMinValue;
 
@@ -341,6 +341,18 @@ namespace CachingCollections
             return falseToIndicateEnumerationPreviouslyDone;
         }
 
+
+        /// <summary>
+        /// If the source items have not been enumerated previously, does so while executing the given
+        /// <paramref name="aggregateFunction"/> and updating the internal <see cref="_filteredCount"/>, and
+        /// returns <see langword="true"/>.  Otherwise, if the source has previously been enumerated, returns
+        /// <see langword="false"/>.
+        /// </summary>
+        /// <param name="aggregateFunction">The function to apply to each item as the source items is enumerated.
+        /// </param>
+        /// <param name="aggregateResult">The result of the applying the given <paramref name="aggregateFunction"/>
+        /// to the source items.</param>
+        /// <returns></returns>
         private bool TryFirstTimeEnumeration(Func<T?, T?, T?> aggregateFunction, out T? aggregateResult)
         {
             // Note, a simpler implementation would be: aggregateResult = this.Aggregate(aggregateFunction);
