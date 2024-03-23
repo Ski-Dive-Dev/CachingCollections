@@ -94,6 +94,10 @@ namespace CachingCollectionTests
             AddFilter(p => p.Level == SkillLevel.VeryHigh);
             return this;
         }
+
+        public Person? GetOldestPerson() => ItemWithMaxValue(p => p.Age);
+
+        public Person? GetYoungestPerson() => ItemWithMinValue(p => p.Age);
     }
 
 
@@ -156,6 +160,11 @@ namespace CachingCollectionTests
             _cc.AddFilter(p => p.Level == SkillLevel.VeryHigh);
             return this;
         }
+
+
+        public Person? GetOldestPerson() => _cc.ItemWithMaxValue(p => p.Age);
+
+        public Person? GetYoungestPerson() => _cc.ItemWithMinValue(p => p.Age);
 
 
         public IEnumerator<Person?> GetEnumerator() => _cc.GetEnumerator();
@@ -224,6 +233,8 @@ namespace CachingCollectionTests
             var active = activePeople.ToList();
             var notDeleted = notDeletedPeople.ToList();
             var activeNotDeleted = activeNotDeletedPeople.ToList();
+            var oldestPerson = allPeople.GetOldestPerson();
+            var youngestPerson = allPeople.GetYoungestPerson();
 
 
             // Assert
@@ -235,6 +246,12 @@ namespace CachingCollectionTests
 
             expected = items.Where(p => p.IsActive && !p.IsDeleted);
             Assert.True(AssertSimpleCollectionsAreEquivalent(expected, activeNotDeleted));
+
+            var expectedOldestPerson = items.OrderByDescending(p => p.Age).FirstOrDefault();
+            Assert.Equal(expectedOldestPerson, oldestPerson);
+
+            var expectedYoungestPerson = items.OrderBy(p => p.Age).FirstOrDefault();
+            Assert.Equal(expectedYoungestPerson, youngestPerson);
         }
 
 
@@ -243,7 +260,7 @@ namespace CachingCollectionTests
         {
             // Arrange
 
-            // The source data is injeted into the CachingCollectionInternal constructor
+            // The source data is injected into the CachingCollectionInternal constructor
             var items = GeneratePeople();
             var cachingCollection = (ICachingCollectionInternal<Person>)new CachingCollectionInternal<Person>(items);
 
@@ -267,6 +284,8 @@ namespace CachingCollectionTests
             var active = activePeople.ToList();
             var notDeleted = notDeletedPeople.ToList();
             var activeNotDeleted = activeNotDeletedPeople.ToList();
+            var oldestPerson = allPeople.GetOldestPerson();
+            var youngestPerson = allPeople.GetYoungestPerson();
 
 
             // Assert
@@ -278,7 +297,14 @@ namespace CachingCollectionTests
 
             expected = items.Where(p => p.IsActive && !p.IsDeleted);
             Assert.True(AssertSimpleCollectionsAreEquivalent(expected, activeNotDeleted));
+
+            var expectedOldestPerson = items.OrderByDescending(p => p.Age).FirstOrDefault();
+            Assert.Equal(expectedOldestPerson, oldestPerson);
+
+            var expectedYoungestPerson = items.OrderBy(p => p.Age).FirstOrDefault();
+            Assert.Equal(expectedYoungestPerson, youngestPerson);
         }
+
 
         public static bool AssertSimpleCollectionsAreEquivalent<T>(IEnumerable<T> expected, IEnumerable<T> actual)
         {
@@ -286,12 +312,12 @@ namespace CachingCollectionTests
             // expectedContainsAllActualValues.
 
             var actualHashset = new HashSet<T>(actual);
-            foreach (var i in expected)
-            {
-                var hc = i.GetHashCode();
-                var f = actual.Contains(i);
-                if (!f) return false;
-            }
+            //foreach (var i in expected)
+            //{
+            //    var hc = i.GetHashCode();
+            //    var f = actual.Contains(i);
+            //    if (!f) return false;
+            //}
             var actualContainsAllExpectedValues = expected.All(i => actualHashset.Contains(i));
             return actualContainsAllExpectedValues;
         }
