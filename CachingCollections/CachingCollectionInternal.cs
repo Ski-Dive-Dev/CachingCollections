@@ -46,25 +46,25 @@ namespace CachingCollections
 
 
         /// <inheritdoc/>>
-        public new void AddFilter(Predicate<T> predicate) => base.AddFilter(predicate);
+        public new void AddFilter(Predicate<T> predicate, string filterName) => base.AddFilter(predicate, filterName);
 
         /// <inheritdoc/>>
-        public new void RemoveFilter(Predicate<T> predicate) => base.RemoveFilter(predicate);
+        public new void RemoveFilter(string filterName) => base.RemoveFilter(filterName); // XXXXX public new void RemoveFilter(Predicate<T> predicate) => base.RemoveFilter(predicate);
 
         /// <inheritdoc/>>
-        public new ICachingCollectionInternal<T> StartScopedQuery()
-        {
-            lock (_queryBuilderLock)
-            {
-                // This is NOT pretty, but we can't access clone._queryBuilder directly
+        public new ICachingCollectionInternal<T> StartScopedQuery() => (ICachingCollectionInternal<T>)base.StartScopedQuery();
+        //{
+        //    lock (_queryBuilderLock)
+        //    {
+        //        // This is NOT pretty, but we can't access clone._queryBuilder directly
 
-                var savedQueryBuilder = _queryBuilder;
-                _queryBuilder = new HashSet<Predicate<T>>(_queryBuilder);
-                var clone = Clone();
-                _queryBuilder = savedQueryBuilder;
-                return (ICachingCollectionInternal<T>)clone;
-            }
-        }
+        //        var savedQueryBuilder = _queryBuilder;
+        //        _queryBuilder = new HashSet<Predicate<T>>(_queryBuilder);
+        //        var clone = Clone();
+        //        _queryBuilder = savedQueryBuilder;
+        //        return (ICachingCollectionInternal<T>)clone;
+        //    }
+        //}
 
         public new void Dispose() => base.Dispose();
     }

@@ -21,7 +21,7 @@ namespace CachingCollections
         /// Adds a query condition; like adding a "Where()" clause.
         /// </summary>
         /// <param name="predicate">Example: <c>AddPredicate(p => p.IsActive)</c></param>
-        void AddFilter(Predicate<T> predicate);
+        void AddFilter(Predicate<T> predicate, string filterName);
 
         /// <summary>
         /// Removes the given query condition from the currently in-scoped query builder, if present.
@@ -39,7 +39,7 @@ namespace CachingCollections
         /// </code>
         /// </remarks>
         /// <param name="predicate">Example: <c>RemovePredicate(p => p.IsActive)</c></param>
-        void RemoveFilter(Predicate<T> predicate);
+        void RemoveFilter(string filterName); // XXXXX void RemoveFilter(Predicate<T> predicate);
 
         /// <summary>
         /// Any filters, and their respective caches, that are added within the scope of this query are discarded
@@ -164,7 +164,7 @@ namespace CachingCollections
         /// more optimal performance.
         /// </para>
         /// </remarks>
-        IReadOnlyCollection<T> Items { get; }
+        ICollection<T> Items { get; }
 
 
         /// <summary>
@@ -179,8 +179,10 @@ namespace CachingCollections
         /// The source for the <see cref="SourceItems"/> enumeration should always produce the same stream of
         /// items.  Once the source items have been fully enumerated (<c>ItemsFullyEnumerated</c>), any changes to
         /// the stream of source items are not reflected by the caching collection.  Also, any changes to the
-        /// enumerated items will not be reflected by the filtering in effect.  Therefore, the source items should
-        /// be treated as being immutable while being used in a caching collection.
+        /// enumerated items may or may not be reflected by the filtering in effect.  Mutated items within a cache
+        /// are not removed from the cache if that mutated item no longer satisfies the cache's predicate.
+        /// Therefore, the source items should be treated as being immutable while being used in a caching
+        /// collection.
         /// </para>
         /// </remarks>
         IEnumerable<T> SourceItems { get; }

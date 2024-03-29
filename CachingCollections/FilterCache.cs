@@ -10,6 +10,7 @@ namespace CachingCollections
     /// <typeparam name="T">The <see langword="type"/> of source items within the collection.</typeparam>
     internal class FilterCache<T> where T : class?
     {
+        public string FilterName; // XXXXX
         private const int _unknown = -1;
         protected int _numItems;
         private int _maxNumMisses;
@@ -31,11 +32,11 @@ namespace CachingCollections
         /// determines, based on the current number of items within the cache, what the maximum number of
         /// cache misses are permitted before the <see cref="Misses"/> cache becomes disabled (e.g., due to its
         /// ineffectiveness.)</param>
-        public FilterCache(Predicate<T> predicate, int numItems, float requiredUtilizationThreshold = 0.5f)
+        public FilterCache(Predicate<T> predicate, string filterName, int numItems, float requiredUtilizationThreshold = 0.5f)
         {
             if (requiredUtilizationThreshold < 0 || requiredUtilizationThreshold > 1)
             {
-                throw new ArgumentException("Value must be between 0 and 1, inclusive.",
+                throw new ArgumentException("Value must be between 0 and 1, inclusively.",
                     nameof(requiredUtilizationThreshold));
             }
 
@@ -45,6 +46,7 @@ namespace CachingCollections
             }
 
             Predicate = predicate;
+            FilterName = filterName; // XXXXX
             _numItems = numItems;
             _requiredUtilizationThreshold = requiredUtilizationThreshold;
 
@@ -61,13 +63,43 @@ namespace CachingCollections
         /// </summary>
         public Predicate<T> Predicate { get; }
 
+        /// <summary>
+        /// The collection of items that satisfy the predicate of this filter.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This cache of items doesn't necessarily improve performance because it's a <see cref="HashSet{T}"/> --
+        /// its fast <see cref="HashSet{T}.Contains(T)"/> method is probably similar in performance to using the
+        /// predicate to decide whether an item is filtered-in or not.
+        /// </para><para>
+        /// This collection's impact on performance comes from the fact that, when this particular filter is the
+        /// most restrictive within a query scope, fewer comparisons need to be made because the collection is pre-
+        /// filtered against the <see cref="CachingCollectionBase{T}.SourceItems"/>.
+        /// </para>
+        /// </remarks>
         public HashSet<T> Items { get; }
+
+        [Obsolete]
         public HashSet<T>? Misses { get; private set; }
 
+        /// <summary>
+        /// The number of source items that satisfied the <see cref="Predicate"/>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This is not a value which tracks all the hits against the cache within the cache's lifetime.  It is
+        /// specifically used to track the number of source items that satisfied the <see cref="Predicate"/> after
+        /// the first full enumeration of source items.
+        /// </para><para>
+        /// Due to potential duplicates in the source items, we cannot use the <see cref="HashSet{T}.Count"/>
+        /// property of <see cref="Items"/>.  We also don't want to use that property in case at some point we
+        /// decide to (programmatically) disable and clear <see cref="Items"/> for memory efficiency.
+        /// </para>
+        /// </remarks>
         public int NumHits
         {
             get => _numHits;
-            set // TODO: It doesn't make sense that a client can set this value; there should be a "CacheHit()" method instead
+            internal set
             {
                 if (value < 0)
                 {
@@ -77,10 +109,24 @@ namespace CachingCollections
             }
         }
 
+        /// <summary>
+        /// The number of source items that did not satisfy the <see cref="Predicate"/>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This is not a value which tracks all the misses against the cache within the cache's lifetime.  It is
+        /// specifically used to track the number of source items that do not satisfy the <see cref="Predicate"/>
+        /// after the first full enumeration of source items.
+        /// </para><para>
+        /// This should equal <see cref="_numItems"/> minus <see cref="NumHits"/>, but we calculate
+        /// <see cref="CacheIsComplete"/> from <see cref="NumHits"/> and <see cref="NumMisses"/>, which would
+        /// result in circular logic.
+        /// </para>
+        /// </remarks>
         public int NumMisses
         {
             get => _numMisses;
-            set // TODO: It doesn't make sense that a client can set this value; there should be a "CacheMiss()" method instead
+            internal set
             {
                 if (value < 0)
                 {
@@ -91,28 +137,29 @@ namespace CachingCollections
         }
 
 
+        public bool CacheIsDisabled { get; private set; }
+
+        [Obsolete]
         public bool MissesCacheIsDisabled { get; private set; }
 
 
         /// <summary>
-        /// Cache is complete when all the known values in <see cref="SourceItems"/> have been evaluated.
-        /// However, if the complete set of known values in <see cref="SourceItems"/> is unknown, then the
-        /// cache will never be "complete."
+        /// Cache is complete when all the known values in <see cref="CachingCollectionBase{T}.SourceItems"/> have
+        /// been evaluated.  However, if the complete set of known values in
+        /// <see cref="CachingCollectionBase{T}.SourceItems"/> is unknown, then the cache will never be "complete."
         /// </summary>
+        /// <remarks>
+        /// If the <see cref="CachingCollectionBase{T}.SourceItems"/> enumeration is an unbounded sequence of
+        /// items, a first enumeration can never complete, and therefore, the caches can never be "complete."
+        /// </remarks>
         public bool CacheIsComplete
         {
             get
             {
                 Debug.Assert(_numItems != _unknown || NumMisses + NumHits != _numItems,
                     "Didn't expect NumMisses + NumHits to ever equal our code for 'unknown.'");
-                var cacheIsComplete = NumMisses + NumHits == _numItems;
 
-                if (cacheIsComplete && Misses != null)
-                {
-                    StopCachingMisses();
-                }
-
-                return cacheIsComplete;
+                return NumMisses + NumHits == _numItems;
             }
         }
 
@@ -121,6 +168,7 @@ namespace CachingCollections
         /// Disables use of the <see cref="Misses"/> cache.  This is often done due to its measured
         /// ineffectiveness, but might also be done to use less memory (at the cost of less performance.)
         /// </summary>
+        [Obsolete]
         public void StopCachingMisses() => Misses = null;
 
 
@@ -144,7 +192,7 @@ namespace CachingCollections
         /// <remarks>
         /// The naming of this method follows the
         /// <a href="https://medium.com/@lexitrainerph/understanding-the-c-tryxxx-method-pattern-from-basic-to-advanced-b43a895d4cd4">
-        /// Try Method Pattern</a> -- it's not intended to convey an impression that it's desireable to disable the
+        /// Try Method Pattern</a> -- it's not intended to convey an impression that it's desirable to disable the
         /// cache.
         /// </remarks>
         /// <returns><see langword="true"/> or <see langword="false"/> if the cache is currently DISabled, or

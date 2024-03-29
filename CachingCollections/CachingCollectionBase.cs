@@ -11,6 +11,10 @@ namespace CachingCollections
     /// </summary>
     /// <remarks>
     /// <para>
+    /// CachingCollections is typically used to hold the result of an expensive query against persistent storage or
+    /// from across the network -- and then multiple, higher-performance sub-queries can be made against the
+    /// CachingCollection.
+    /// </para><para>
     /// This class uses three techniques to optimize queries:
     /// <list type="number">
     /// <item>Minimizes the number of times a collection is enumerated</item>
@@ -25,8 +29,8 @@ namespace CachingCollections
     /// </para>
     /// </remarks>
     /// <typeparam name="T">The type of the items in the collection.</typeparam>
-    public partial class CachingCollectionBase<T> : ICachingCollectionCommon<T>, IEnumerable<T?>, ICloneable, IDisposable
-        where T : class
+    public partial class CachingCollectionBase<T> : ICachingCollectionCommon<T>, IEnumerable<T?>, ICloneable,
+        IDisposable where T : class
     {
         // See the ItemEnumerator inner class in another file, that is also a member of this partial class.
 
@@ -34,14 +38,17 @@ namespace CachingCollections
         protected readonly object _queryBuilderLock = new object();
 
         /// <summary>
-        /// The collection of filters built through the fluent interface, by the client of this class.
+        /// The collection of filters built through the fluent interface, by the client of this class, within the
+        /// current scope.
         /// </summary>
         /// <remarks>
         /// The filters are not (necessarily) applied in the order in which they were built through the fluent
         /// interface.  Instead, since they are <a href="https://en.wikipedia.org/wiki/Commutativity">commutative
-        /// </a>, they are executed in an order to minimize the amount of comparisons that need to be be made.
+        /// </a>, they are executed in an order to minimize the number of comparisons that need to be be made.
         /// </remarks>
-        protected HashSet<Predicate<T>> _queryBuilder = new HashSet<Predicate<T>>();
+        protected IDictionary<string, Predicate<T>> _queryBuilder = new Dictionary<string, Predicate<T>>();
+
+        protected bool _queryBuilderIsOrdered = false;
 
         /// <summary>
         /// When a new scope is created (for example, via <see cref="StartScopedQuery"/>), this field holds the
@@ -56,13 +63,17 @@ namespace CachingCollections
         /// particular predicate evaluated.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// This cache is maintained by its derived (or decorating) classes through the
         /// <see cref="AddFilter(Predicate{T})"/> and <see cref="RemoveFilter(Predicate{T})"/> methods.
+        /// </para><para>
+        /// While the cache is ordered for optimization within the current scope, the <see cref="FilterCache{T}"/>
+        /// objects within the cache are shared through all scopes by reference sharing.
+        /// </para>
         /// </remarks>
-        // TODO: This collection is frequently sorted by qc.Items.Count -- the frequency of this sorting could
-        // probably be managed-down.  For example, only when ItemEnumerator.EvalueateItemForASingleFilter() adds at
-        // least one item to the Items cache of a FilterCache (i.e., sort after ItemEnumerator enumerates.)
         private ICollection<FilterCache<T>> _cache = new List<FilterCache<T>>();
+
+        private SharedData<T> _sharedData = new SharedData<T>();
 
 
         #region Constructors
@@ -108,11 +119,12 @@ namespace CachingCollections
         /// <see cref="Object.Equals(object)"/> when compared to one another.</param>
         public CachingCollectionBase(ICollection<T> items, bool removeDuplicates = true)
         {
-            DuplicatesAlwaysRemoved = removeDuplicates;
-            _noDupesItems = items;
+            _sharedData.SourceItems = items;
 
-            SourceItems = items;
-            Items = (IReadOnlyCollection<T>)items;
+            DuplicatesAlwaysRemoved = removeDuplicates;
+            NoDupeItems = items;
+
+            Items = items;
             ItemsIsComplete = true; // because items is an ICollection, and not an IEnumerable
         }
 
@@ -167,25 +179,21 @@ namespace CachingCollections
         {
             // Note: _items will be built while items is fully enumerated the 1st time
 
-            SourceItems = items;
+            _sharedData.SourceItems = items;
             DuplicatesAlwaysRemoved = removeDuplicates;
         }
 
 
         protected CachingCollectionBase(CachingCollectionBase<T> cachingCollection)
         {
-            _noDupesItems = cachingCollection._noDupesItems;
-            ItemsIsComplete = cachingCollection.ItemsIsComplete;
-            _cache = cachingCollection._cache;
-            SourceItems = cachingCollection.SourceItems;
-            DuplicatesAlwaysRemoved = cachingCollection.DuplicatesAlwaysRemoved;
+            _sharedData = cachingCollection._sharedData;
         }
 
 
         #endregion
 
         /// <inheritdoc/>
-        public IEnumerable<T> SourceItems { get; }
+        public IEnumerable<T> SourceItems => _sharedData.SourceItems;
 
 
         /// <inheritdoc/>
@@ -193,10 +201,10 @@ namespace CachingCollections
         {
             _ = TryFirstTimeEnumeration();
 
-            Debug.Assert(_noDupesItems is HashSet<T>, $"We expected {nameof(_noDupesItems)} to be a HashSet so" +
+            Debug.Assert(NoDupeItems is HashSet<T>, $"We expected {nameof(NoDupeItems)} to be a HashSet so" +
                 $" that we can get O(1) performance on the Contains() call.");
 
-            return _noDupesItems.Contains(item);
+            return NoDupeItems.Contains(item);
         }
 
         /// <inheritdoc/>
@@ -204,7 +212,7 @@ namespace CachingCollections
         {
             var itemWithMaxValue = TryFirstTimeEnumeration(LargerOfTwo, out var itemWithMaxValue2)
                 ? itemWithMaxValue2 // the result of applying the aggregate while enumerating for first time
-                : _noDupesItems.Aggregate(LargerOfTwo); // _items is fully enumerated
+                : NoDupeItems.Aggregate(LargerOfTwo); // _items is fully enumerated
 
             return itemWithMaxValue;
 
@@ -222,7 +230,7 @@ namespace CachingCollections
         {
             var itemWithMinValue = TryFirstTimeEnumeration(SmallerOfTwo, out var itemWithMinValue2)
                 ? itemWithMinValue2 // the result of applying the aggregate while enumerating for first time
-                : _noDupesItems.Aggregate(SmallerOfTwo); // _items is fully enumerated
+                : NoDupeItems.Aggregate(SmallerOfTwo); // _items is fully enumerated
 
             return itemWithMinValue;
 
@@ -236,7 +244,11 @@ namespace CachingCollections
         }
 
         /// <inheritdoc/>
-        public IReadOnlyCollection<T> Items { get; private set; } = new List<T>();
+        public ICollection<T> Items
+        {
+            get => _sharedData.Items;
+            private set => _sharedData.Items = value;
+        }
 
 
         /// <summary>
@@ -258,7 +270,11 @@ namespace CachingCollections
         /// performance implications.
         /// </para>
         /// </remarks>
-        private ICollection<T> _noDupesItems = new HashSet<T>();
+        private ICollection<T> NoDupeItems
+        {
+            get => _sharedData.NoDupeItems;
+            set => _sharedData.NoDupeItems = value;
+        }
 
 
         /// <summary>
@@ -266,27 +282,35 @@ namespace CachingCollections
         /// of the source items (<see cref="SourceItems"/>).
         /// </summary>
         /// <remarks>
-        /// Does not represent whether <see cref="_noDupesItems"/> represents a fully enumerated copy of the source
+        /// Does not represent whether <see cref="NoDupeItems"/> represents a fully enumerated copy of the source
         /// items -- see <see cref="ItemsFullyEnumerated"/>.
         /// </remarks>
-        internal bool ItemsIsComplete { get; private set; } = false;
+        internal bool ItemsIsComplete
+        {
+            get => _sharedData.ItemsIsComplete;
+            private set => _sharedData.ItemsIsComplete = value;
+        }
 
 
         /// <summary>
         /// A <see langword="bool"/> which indicates that the source items (<see cref="SourceItems"/>) has been
-        /// fully enumerated at least once, and that <see cref="_noDupesItems"/> contains the full set (without
+        /// fully enumerated at least once, and that <see cref="NoDupeItems"/> contains the full set (without
         /// duplicates) and <see cref="Items"/> contains the full set (potentially with duplicates.)
         /// </summary>
-        internal bool ItemsFullyEnumerated => ItemsIsComplete && _noDupesItems.Count <= Items.Count;
+        internal bool ItemsFullyEnumerated => ItemsIsComplete && NoDupeItems.Count <= Items.Count;
 
 
         /// <inheritdoc/>
         public bool DuplicatesHaveBeenDetected => ItemsFullyEnumerated
-            && _noDupesItems.Count /*the hashset*/ < Items.Count /*the collection*/;
+            && NoDupeItems.Count /*the hashset*/ < Items.Count /*the collection*/;
 
 
         /// <inheritdoc/>
-        public bool DuplicatesAlwaysRemoved { get; private set; }
+        public bool DuplicatesAlwaysRemoved
+        {
+            get => _sharedData.DuplicatesAlwaysRemoved;
+            private set => _sharedData.DuplicatesAlwaysRemoved = value;
+        }
 
 
         /// <inheritdoc/>
@@ -296,7 +320,7 @@ namespace CachingCollections
             {
                 _ = TryFirstTimeEnumeration(); // XXXXX Check if Items is full first
 
-                return DuplicatesAlwaysRemoved ? _noDupesItems.Count : Items.Count;
+                return DuplicatesAlwaysRemoved ? NoDupeItems.Count : Items.Count;
             }
         }
 
@@ -386,60 +410,107 @@ namespace CachingCollections
         /// <summary>
         /// Adds a query condition; like adding a "Where()" clause.
         /// </summary>
-        /// <param name="predicate">Example: <c>AddPredicate(p => p.IsActive)</c></param>
-        protected void AddFilter(Predicate<T> predicate)
+        /// <param name="predicate">Example: <c>AddFilter(p => p.IsActive, "FilterByIsActive")</c></param>
+        protected void AddFilter(Predicate<T> predicate, string filterName)
         {
             lock (_queryBuilderLock)
             {
-                if (_queryBuilder.Contains(predicate))
+                if (_queryBuilder.ContainsKey(filterName)) // XXXXX if (_queryBuilder.Contains(predicate))
                 {
                     return;
                 }
 
                 // We don't want to call Count(), because we don't want to inadvertently enumerate SourceItems:
                 var numItems = ItemsIsComplete
-                    ? _noDupesItems.Count
+                    ? NoDupeItems.Count
                     : _unknown;
 
-                var filterCache = new FilterCache<T>(predicate, numItems);
+                var filterCache = new FilterCache<T>(predicate, filterName, numItems);
+
+                // The filter cache is added to the root _cache so that all scopes can benefit from it:
                 _cache.Add(filterCache);
-                _queryBuilder.Add(predicate);
+
+                _queryBuilder.Add(filterName, predicate); // XXXXX _queryBuilder.Add(predicate);
+                _queryBuilderIsOrdered = false;
             }
         }
 
 
-        protected void RemoveFilter(Predicate<T> predicate)
+        /// <summary>
+        /// Removes the query condition from the current scope.
+        /// </summary>
+        /// <remarks>
+        /// The filter is removed from the current scope, but its associated cache is not removed.  If it is a
+        /// concern that the cache is taking up memory (and the cache is not used by other scopes), it can be
+        /// removed with <see cref="try"/>
+        /// </remarks>
+        /// <param name="predicate">The same predicate that was used when it was added. // XXXXX
+        // /// Example: <c>RemoveFilter(p => p.IsActive)</c><</param>
+        /// Example: <c>RemoveFilter("FilterByIsActive")</c><</param>
+        protected void RemoveFilter(string filterName) // XXXXX Predicate<T> predicate, 
         {
-            lock (_queryBuilderLock) _queryBuilder.Remove(predicate);
+            lock (_queryBuilderLock)
+            {
+                // Even though we remove the filter from this scope, we keep its associated cache for possible use
+                // by other scopes.
+
+                _queryBuilder.Remove(filterName); // XXXXX _queryBuilder.Remove(predicate);
+                _queryBuilderIsOrdered = false;
+            }
+        }
+
+
+        /// <summary>
+        /// Returns the collection of <see cref="FilterCache{T}"/> caches that are in the current scope, as defined
+        /// by the <see cref="_queryBuilder"/> collection.
+        /// </summary>
+        /// <remarks>
+        /// This method promotes non-recursive locking and therefore must be called from a client that has a lock
+        /// on <see cref="_queryBuilderLock"/>.
+        /// </remarks>
+        private IEnumerable<FilterCache<T>> GetQueriesWithinScope_RequiresLock() =>
+            _cache.Where(qc => _queryBuilder.ContainsKey(qc.FilterName));
+        // XXXXX _cache.Where(qc => _queryBuilder.Contains(qc.Predicate));
+
+
+        private void HandleEndOfSourceItems(ICollection<T>? newItemCollection,
+        ICollection<T>? newItemCollectionNoDupes)
+        {
+            lock (_queryBuilderLock) SetItemsAsComplete_RequiresLock(newItemCollection, newItemCollectionNoDupes);
+            _ = TryOptimizeQueryOrder();
         }
 
 
         /// <summary>
         /// Sets <see cref="ItemsIsComplete"/> to <see langword="true"/>.
         /// </summary>
+        /// <remarks>
+        /// This method promotes non-recursive locking and therefore must be called from a client that has a lock
+        /// on <see cref="_queryBuilderLock"/>.
+        /// </remarks>
         /// <param name="newItemCollection">If a non-null value is provided, sets <see cref="Items"/> to this
         /// collection.</param>
         /// <param name="newItemCollectionNoDupes">If a non-null value is provided, sets
-        /// <see cref="_noDupesItems"/> to this collection and updates all the cached queries with its count.
+        /// <see cref="NoDupeItems"/> to this collection and updates all the cached queries with its count.
         /// "No Dupes" refers to identical instances of an object, not necessarily those that are the same when
         /// compared with <see cref="IEqualityComparer"/>.</param>
-        internal void SetItemsAsComplete(ICollection<T>? newItemCollection,
-            ICollection<T>? newItemCollectionNoDupes)
+        internal void SetItemsAsComplete_RequiresLock(ICollection<T>? newItemCollection,
+        ICollection<T>? newItemCollectionNoDupes)
         {
             ItemsIsComplete = true;
             if (newItemCollectionNoDupes != null)
             {
-                _noDupesItems = (HashSet<T>)newItemCollectionNoDupes;
+                NoDupeItems = (HashSet<T>)newItemCollectionNoDupes;
 
                 foreach (var filterCache in _cache)
                 {
-                    filterCache.SetNumSourceItems(_noDupesItems.Count);
+                    filterCache.SetNumSourceItems(NoDupeItems.Count);
                 }
             }
 
             if (newItemCollection != null)
             {
-                Items = (IReadOnlyCollection<T>)newItemCollection;
+                Items = newItemCollection;
             }
         }
 
@@ -451,7 +522,16 @@ namespace CachingCollections
         IEnumerator IEnumerable.GetEnumerator() => (IEnumerator)GetEnumerator();
 
 
-        /// <inheritdoc/>
+        /// <summary>
+        /// Any filters, and their respective caches, that are added within the scope of this query are discarded
+        /// after this query goes out-of-scope.  Any filters added to the invoked object after this scope starts
+        /// are not included in this scope.
+        /// </summary>
+        /// <returns>A <see name="ICachingCollection<T>"/> object where fresh filters can be added (e.g., via
+        /// method-chaining), while continuing the filtering already in place within the invoked object, and the
+        /// filter caches are shared amongst all decendants of the root <see name="ICachingCollection<T>"/> object.
+        /// </returns>
+        /// type <typeparamref name="TCollection"/>.</exception>
         protected ICachingCollection<T> StartScopedQuery()
         {
             lock (_queryBuilderLock)
@@ -459,14 +539,71 @@ namespace CachingCollections
                 // This is NOT pretty, but we can't access clone._queryBuilder directly
 
                 var savedQueryBuilder = _queryBuilder;
-                _queryBuilder = new HashSet<Predicate<T>>(_queryBuilder);
+                _queryBuilder = new Dictionary<string, Predicate<T>>(_queryBuilder); // XXXXX _queryBuilder = new HashSet<Predicate<T>>(_queryBuilder);
                 var clone = Clone();
                 _queryBuilder = savedQueryBuilder;
                 return (ICachingCollection<T>)clone;
             }
         }
 
+        /// <summary>
+        /// Optimizes the order in which completed (<see cref="FilterCache{T}.CacheIsComplete"/>) caches are
+        /// queried to reduce the number of comparisons that need to made for queries.
+        /// </summary>
+        /// <remarks>
+        /// This method promotes non-recursive locking and therefore must be called from a client that has a lock
+        /// on <see cref="_queryBuilderLock"/>.
+        /// </remarks>
+        private void OptimizeQueryOrder_RequiresLock()
+        {
+            // The cache is a collection of FilterCaches.  We want to order these so that the most restrictive
+            // FilterCaches sort first.
+            // FilterCaches without any misses (NumMisses == 0) are not at all restrictive, so we want those to
+            // sort last.  If all the FilterCaches are "CacheIsComplete" then they all have the same number of
+            // NumHits and are all at the bottom of the sorted list together.
+            // Bear in mind that FilterCaches complete individually from each other, and so the number of
+            // NumHits + NumMisses will vary between them except for "CacheIsComplete" FilterCaches.
+            // If NumMisses > 0, then the ratio of Hits:Misses is used to determine most restrictive.
+            // For example, 1:9 is very restrictive (only 1 source item met the predicate out of 10).
+            // Conversely, 9:1 is very un-restrictive (9 out of 10 source items met the predicate.)
 
+            _cache = _cache
+                .OrderBy(fc => fc.NumMisses == 0 ? fc.NumHits : fc.NumHits / fc.NumMisses)
+                .ToList();
+            _queryBuilderIsOrdered = true;
+        }
+
+        /// <summary>
+        /// Optimizes the order in which completed (<see cref="FilterCache{T}.CacheIsComplete"/>) caches are
+        /// queried to reduce the number of comparisons that need to made for queries.
+        /// </summary>
+        protected void OptimizeQueryOrder()
+        {
+            lock (_queryBuilderLock) OptimizeQueryOrder_RequiresLock();
+        }
+
+        /// <summary>
+        /// Orders the cache for optimal searches if <see cref="_queryBuilderIsOrdered"/> is
+        /// <see langword="false"/> and then sets <see cref="_queryBuilderIsOrdered"/> to <see langword="true"/>.
+        /// Does nothing and returns <see langword="false"/> if <see cref="_queryBuilderIsOrdered"/> is
+        /// <see langword="true"/>.
+        /// </summary>
+        /// <returns><see langword="true"/> or <see langword="false"/> if ordering was needed.</returns>
+        protected bool TryOptimizeQueryOrder()
+        {
+            lock (_queryBuilderLock)
+            {
+                if (_queryBuilderIsOrdered) { return false; }
+
+                OptimizeQueryOrder_RequiresLock();
+                return true;
+            }
+        }
+
+
+        /// <summary>
+        /// Closes the current scope created by <see cref="StartScopedQuery"/>.
+        /// </summary>
         protected virtual void Dispose(bool disposing)
         {
             if (!disposedValue)
@@ -479,7 +616,7 @@ namespace CachingCollections
                         // Iterate through the _queryBuilder objects created in this instance and clear their caches
                         foreach (var queryBuilder in _queryBuilder)
                         {
-                            var filterCache = _cache.Where(qc => qc.Predicate == queryBuilder
+                            var filterCache = _cache.Where(qc => qc.FilterName == queryBuilder.Key // XXXXX var filterCache = _cache.Where(qc => qc.Predicate == queryBuilder
                                 && !_preExistingQueryBuilder.Contains(qc.Predicate))
                                 .FirstOrDefault();
 
@@ -515,6 +652,7 @@ namespace CachingCollections
             var clone = (CachingCollectionBase<T>)MemberwiseClone();
             clone._preExistingQueryBuilder = _preExistingQueryBuilder;
             clone._queryBuilder = _queryBuilder;
+            clone._sharedData = _sharedData;
             return clone;
         }
     }

@@ -28,25 +28,20 @@ namespace CachingCollections
             public ItemEnumerator(CachingCollectionBase<T> cachingCollection)
             {
                 _cachingCollection = cachingCollection;
+                _ = cachingCollection.TryOptimizeQueryOrder();
+
                 lock (cachingCollection._queryBuilderLock)
                 {
-                    var queryBuilder = cachingCollection._queryBuilder;
-                    var cache = cachingCollection._cache;
+                    var orderedActiveQueries = cachingCollection.GetQueriesWithinScope_RequiresLock();
 
                     if (cachingCollection.ItemsIsComplete)
                     {
-                        // XXXXX Maybe we don't sort if #items * #predicates is low
-
-                        // We're assuming that IEnumerable.OrderBy() is a stable sort, and that the _cache is built
-                        // in the order that the client of this class believes is most optimal, whose order we fall
-                        // back on if needed (by way of OrderBy() being a stable sort):
-                        var orderedActiveQueries = cache
-                            .Where(qc => queryBuilder.Contains(qc.Predicate));
-                            // XXXXX Experiment to remove; see HandleEndOfSourceItems()  .OrderBy(qc => qc.CacheIsComplete ? qc.Items.Count : Int32.MaxValue); // TODO: This is expensive; we should maintain _cache as an ordered collection
-
                         var mostRestrictiveQuery = orderedActiveQueries.First();
 
-                        if (!mostRestrictiveQuery.MissesCacheIsDisabled && mostRestrictiveQuery.CacheIsComplete)
+                        var canUseEnabledCompletedCache = !mostRestrictiveQuery.CacheIsDisabled
+                            && mostRestrictiveQuery.CacheIsComplete;
+
+                        if (canUseEnabledCompletedCache)
                         {
                             _itemEnumerator = mostRestrictiveQuery.Items.GetEnumerator();
                             _queries = orderedActiveQueries.Skip(1);
@@ -54,23 +49,41 @@ namespace CachingCollections
                         else
                         {
                             _itemEnumerator = cachingCollection.DuplicatesAlwaysRemoved
-                                ? cachingCollection._noDupesItems.GetEnumerator()
+                                ? cachingCollection.NoDupeItems.GetEnumerator()
                                 : cachingCollection.Items.GetEnumerator();
                             _queries = orderedActiveQueries;
                         }
+
+                        Debug.Assert(_enumeratedItems is null, $"Since" +
+                            $" {nameof(cachingCollection.ItemsIsComplete)}, we would expect" +
+                            $" {nameof(_enumeratedItems)} to be null; otherwise" +
+                            $" {nameof(cachingCollection.Items)} will get overwritten.");
+
+                        Debug.Assert(_enumeratedItemsNoDupes is null, $"Since" +
+                            $" {nameof(cachingCollection.ItemsIsComplete)}, we would expect" +
+                            $" {nameof(_enumeratedItemsNoDupes)} to be null; otherwise" +
+                            $" {nameof(cachingCollection.NoDupeItems)} will get overwritten.");
                     }
                     else
                     {
-                        // We don't have a full enumeration yet, so we need to go to the SourceItems for enumeration
+                        // We were provided an IEnumerable (instead of an ICollection), and we don't have a full
+                        // enumeration of source items yet, so we need to go to the SourceItems for enumeration.
+                        // Note that any changes client makes to SourceItems are reflected here, but once
+                        // ItemsIsComplete enumerations are not affected by any changes client makes to SourceItems.
                         _itemEnumerator = cachingCollection.SourceItems.GetEnumerator();
 
-                        // Try to finish off the cache that might make the biggest impact on filtering
-                        _queries = cache
-                            .Where(qc => queryBuilder.Contains(qc.Predicate))
-                            .OrderByDescending(qc => qc.Misses?.Count ?? 0); // Most Misses == Most Restrictive
+                        // Note: we might enter this 'else' clause more then once if the client never consumed the
+                        // full enumeration in a foreach (calls like .ToList() would normally fully enumerate.)
+
+                        _queries = orderedActiveQueries;
+
 
                         // Save the enumerated items in these collections:
-                            _enumeratedItems = new List<T>();
+
+                        // If enumeration completes, this assigns to cachingCollection.Items:
+                        _enumeratedItems = new List<T>();
+
+                        // If enumeration completes, this assigns to cachingCollection._noDupeItems
                         _enumeratedItemsNoDupes = new HashSet<T>();
                     }
                 }
@@ -101,6 +114,8 @@ namespace CachingCollections
                 var filteredIn = false;
                 var stillSourceItemsLeftToEnumerate = true;
 
+                // Note: _itemEnumerator may have already been pre-filtered using the most restrictive predicate.
+
                 // Iterate through the source items until one passes all the filters (then return that one):
                 while (!filteredIn && (stillSourceItemsLeftToEnumerate = _itemEnumerator.MoveNext()))
                 {
@@ -108,7 +123,7 @@ namespace CachingCollections
                     AddItem(sourceItem);
                     filteredIn = true;
 
-                    // Iterate through all the predicates to be applied to this item:
+                    // Iterate through all the (remaining) predicates to be applied to this item:
                     foreach (var queryCache in _queries)
                     {
                         Debug.Assert(queryCache != null, "Why would there be a null query in the cache?");
@@ -141,10 +156,13 @@ namespace CachingCollections
 
             internal bool EvaluateItemForASingleFilter(T sourceItem, FilterCache<T> queryCache)
             {
-                if (queryCache.MissesCacheIsDisabled) // TODO: We need a new property that indicates whether the Hits cache is disabled
+                // Bear in mind that the sourceItem isn't some random item provided by random client code -- it's
+                // an item from the finite set of SourceItems -- after the first enumeration, an active cache will
+                // contain the definitive answer as to whether the item meets that cache's predicate.
+
+                if (queryCache.CacheIsDisabled)
                 {
                     // Not trying to cache these items (any more)
-
                     return queryCache.Predicate(sourceItem);
                 }
 
@@ -155,14 +173,6 @@ namespace CachingCollections
                     const bool trueBecauseItemWasPreviouslyEvaluatedAndIsInCache = true;
                     return trueBecauseItemWasPreviouslyEvaluatedAndIsInCache;
                 }
-                else if (queryCache.Misses?.Contains(sourceItem) ?? false)
-                {
-                    // TODO: This additional check of the Misses cache might not be warranted if
-                    // queryCache.Predicate(sourceItem) is performant.
-                    queryCache.NumMisses++;
-                    const bool falseToIndicateSourceItemDidNotPassFilters = false;
-                    return falseToIndicateSourceItemDidNotPassFilters;
-                }
                 else if (queryCache.Predicate(sourceItem))
                 {
                     // It passes the condition, so add it to the cache, and filteredIn is still true
@@ -171,42 +181,18 @@ namespace CachingCollections
                     const bool trueBecauseItemPassedPredicate = true;
                     return trueBecauseItemPassedPredicate;
                 }
-
                 else
                 {
                     queryCache.NumMisses++;
-                    queryCache.Misses?.Add(sourceItem);
-
-                    if (queryCache.Items.Count > 0 && queryCache.MissesCacheIsDisabled)
-                    {
-                        Debug.Assert(queryCache.MissesCacheIsDisabled && _cachingCollection.ItemsIsComplete,
-                            "We didn't expect a cache to be disabled until source items was fully enumerated." +
-                            "  That not being the case, we're inadvertently pre-maturely clearing the Misses" +
-                            " cache here, which impacts the constructor where the assumption" +
-                            " 'Most Misses == Most Restrictive' is relied upon when a previous first-enumeration" +
-                            " was aborted (as in a '.Take(n)', where 'n' < SourceItems.Count.");
-
-                        // Not going to use a cache because there are too many misses:
-                        queryCache.Items.Clear();
-                        queryCache.StopCachingMisses();
-                    }
-
                     const bool falseToIndicateSourceItemDidNotPassFilters = false;
                     return falseToIndicateSourceItemDidNotPassFilters;
                 }
             }
 
 
-            private void HandleEndOfSourceItems()
-            {
-                lock (_cachingCollection._queryBuilderLock)
-                {
-                    _cachingCollection.SetItemsAsComplete(_enumeratedItems, _enumeratedItemsNoDupes);
-                    _cachingCollection._cache = _cachingCollection._cache // XXXXX This is an experiment
-                        .OrderBy(qc => qc.CacheIsComplete ? qc.Items.Count : Int32.MaxValue)
-                        .ToList();
-                }
-            }
+            private void HandleEndOfSourceItems() =>
+                _cachingCollection.HandleEndOfSourceItems(_enumeratedItems, _enumeratedItemsNoDupes);
+
 
             /// <inheritdoc/>
             public void Reset() => throw new NotSupportedException();
