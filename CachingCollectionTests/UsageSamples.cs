@@ -68,22 +68,22 @@ namespace CachingCollectionTests
         public People FilterByActive()
         {
             // Since we inherit from CachingCollectionBase, we can call its methods directly:
-            RemoveFilter(p => !p.IsActive);
-            AddFilter(p => p.IsActive);
+            RemoveFilter(nameof(FilterByActive)); // XXXXX RemoveFilter(p => !p.IsActive);
+            AddFilter(p => p.IsActive, nameof(FilterByActive)); // XXXXX AddFilter(p => p.IsActive);
             return this;
         }
 
         public People FilterByNotDeleted()
         {
             // Since we inherit from CachingCollectionBase, we can call its methods directly:
-            AddFilter(p => !p.IsDeleted);
+            AddFilter(p => !p.IsDeleted, nameof(FilterByNotDeleted)); // XXXXX AddFilter(p => !p.IsDeleted);
             return this;
         }
 
         public People FilterByDeleted()
         {
             // Since we inherit from CachingCollectionBase, we can call its methods directly:
-            AddFilter(p => p.IsDeleted);
+            AddFilter(p => p.IsDeleted, nameof(FilterByDeleted)); // XXXXX AddFilter(p => p.IsDeleted);
             return this;
         }
 
@@ -91,7 +91,7 @@ namespace CachingCollectionTests
         public People FilterByVerySkilled()
         {
             // Since we inherit from CachingCollectionBase, we can call its methods directly:
-            AddFilter(p => p.Level == SkillLevel.VeryHigh);
+            AddFilter(p => p.Level == SkillLevel.VeryHigh, nameof(FilterByActive)); // XXXXX AddFilter(p => p.Level == SkillLevel.VeryHigh);
             return this;
         }
 
@@ -134,22 +134,22 @@ namespace CachingCollectionTests
         public PeopleDI FilterByActive()
         {
             // All Caching Collection calls made through the injected _cc object:
-            _cc.RemoveFilter(p => !p.IsActive);
-            _cc.AddFilter(p => p.IsActive);
+            _cc.RemoveFilter(nameof(FilterByActive));
+            _cc.AddFilter(p => p.IsActive, nameof(FilterByActive));
             return this;
         }
 
         public PeopleDI FilterByNotDeleted()
         {
             // All Caching Collection calls made through the injected _cc object:
-            _cc.AddFilter(p => !p.IsDeleted);
+            _cc.AddFilter(p => !p.IsDeleted, nameof(FilterByNotDeleted));
             return this;
         }
 
         public PeopleDI FilterByDeleted()
         {
             // All Caching Collection calls made through the injected _cc object:
-            _cc.AddFilter(p => p.IsDeleted);
+            _cc.AddFilter(p => p.IsDeleted, nameof(FilterByDeleted));
             return this;
         }
 
@@ -157,7 +157,7 @@ namespace CachingCollectionTests
         public PeopleDI FilterByVerySkilled()
         {
             // All Caching Collection calls made through the injected _cc object:
-            _cc.AddFilter(p => p.Level == SkillLevel.VeryHigh);
+            _cc.AddFilter(p => p.Level == SkillLevel.VeryHigh, nameof(FilterByVerySkilled));
             return this;
         }
 
@@ -312,12 +312,6 @@ namespace CachingCollectionTests
             // expectedContainsAllActualValues.
 
             var actualHashset = new HashSet<T>(actual);
-            //foreach (var i in expected)
-            //{
-            //    var hc = i.GetHashCode();
-            //    var f = actual.Contains(i);
-            //    if (!f) return false;
-            //}
             var actualContainsAllExpectedValues = expected.All(i => actualHashset.Contains(i));
             return actualContainsAllExpectedValues;
         }
